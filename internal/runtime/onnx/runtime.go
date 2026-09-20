@@ -2,12 +2,11 @@ package onnx
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"os"
-	"os/exec"
 	"path/filepath"
 	goruntime "runtime"
+	"strings"
 	"sync"
 	"time"
 
@@ -57,21 +56,47 @@ func (r *Runtime) LibraryPath() (string, error) {
 		}
 	}
 	name := libraryFileName()
+	for _, d := range searchDirs() {
+		p := filepath.Join(d, name)
+		if _, err := os.Stat(p); err == nil {
+			return filepath.Clean(p), nil
+		}
+	}
+	return "", fmt.Errorf("ONNX Runtime shared library (%s) not found; set onnx.library or MODELSERVER_ONNX_LIBRARY", name)
+}
+
+// searchDirs lists the directories scanned for the shared library, in order:
+// next to the server, the working directory, PATH (where Windows looks for
+// DLLs and where an unpacked onnxruntime release usually lands), and finally
+// the platform's conventional library directories.
+func searchDirs() []string {
 	var dirs []string
 	if exe, err := os.Executable(); err == nil {
 		dirs = append(dirs, filepath.Dir(exe), filepath.Join(filepath.Dir(exe), "lib"))
 	}
-	dirs = append(dirs, ".", "lib", "/usr/local/lib", "/usr/lib", "/opt/onnxruntime/lib", "/opt/homebrew/lib")
-	for _, d := range dirs {
-		p := filepath.Join(d, name)
-		if _, err := os.Stat(p); err == nil {
-			return p, nil
+	dirs = append(dirs, ".", "lib")
+	for _, d := range filepath.SplitList(os.Getenv("PATH")) {
+		if d != "" && !skipAutoDiscovery(d) {
+			dirs = append(dirs, d, filepath.Join(d, "lib"))
 		}
 	}
-	if p, err := exec.LookPath(name); err == nil {
-		return p, nil
+	return append(dirs, systemLibraryDirs()...)
+}
+
+// systemLibraryDirs are the conventional install locations per platform.
+func systemLibraryDirs() []string {
+	switch goruntime.GOOS {
+	case "windows":
+		var dirs []string
+		for _, env := range []string{"ProgramFiles", "ProgramW6432", "LOCALAPPDATA"} {
+			if base := os.Getenv(env); base != "" {
+				dirs = append(dirs, filepath.Join(base, "onnxruntime", "lib"), filepath.Join(base, "onnxruntime"))
+			}
+		}
+		return dirs
+	default:
+		return []string{"/usr/local/lib", "/usr/lib", "/opt/onnxruntime/lib", "/opt/homebrew/lib"}
 	}
-	return "", fmt.Errorf("ONNX Runtime shared library (%s) not found; set onnx.library or MODELSERVER_ONNX_LIBRARY", name)
 }
 
 func libraryFileName() string {
@@ -94,6 +119,7 @@ func (r *Runtime) ensureInit() error {
 		}
 		r.libPath = p
 		if !ort.IsInitialized() {
+			prepareLibraryLoad(p)
 			ort.SetSharedLibraryPath(p)
 			if err := ort.InitializeEnvironment(); err != nil {
 				r.initErr = fmt.Errorf("%w: initialize ONNX Runtime from %s: %v", runtime.ErrUnavailable, p, err)
@@ -107,10 +133,9 @@ func (r *Runtime) ensureInit() error {
 func (r *Runtime) Info(ctx context.Context) runtime.Info {
 	info := runtime.Info{Name: r.Name(), Details: map[string]any{}}
 	if err := r.ensureInit(); err != nil {
-		info.Error = errors.Unwrap(err).Error()
-		if info.Error == "" {
-			info.Error = err.Error()
-		}
+		// Report why the library is unavailable (where it was looked for, or
+		// why loading it failed), not just the sentinel.
+		info.Error = strings.TrimPrefix(err.Error(), runtime.ErrUnavailable.Error()+": ")
 		return info
 	}
 	info.Available = true

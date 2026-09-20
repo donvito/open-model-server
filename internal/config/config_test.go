@@ -108,7 +108,8 @@ func TestResolveModelPath(t *testing.T) {
 	if got := cfg.ResolveModelPath("m.gguf"); got != filepath.Join(dir, "m.gguf") {
 		t.Errorf("relative path should resolve in models dir: %s", got)
 	}
-	if got := cfg.ResolveModelPath("/abs/x.gguf"); got != "/abs/x.gguf" {
+	abs := filepath.Join(dir, "elsewhere", "x.gguf")
+	if got := cfg.ResolveModelPath(abs); got != abs {
 		t.Errorf("absolute path should be untouched: %s", got)
 	}
 }

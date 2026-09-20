@@ -93,27 +93,53 @@ func New(opts Options, runner process.Runner, ports *process.PortAllocator, logS
 
 func (r *Runtime) Name() string { return models.RuntimeLlamaCpp }
 
-// BinaryPath resolves the configured llama-server binary.
+// BinaryPath resolves the configured llama-server binary. A value that looks
+// like a path is resolved on disk; a bare name is looked up in PATH and then
+// next to the server executable, which is where a Windows install typically
+// keeps llama-server.exe.
 func (r *Runtime) BinaryPath() (string, error) {
 	b := r.opts.Binary
 	if b == "" {
 		b = "llama-server"
 	}
-	if strings.ContainsRune(b, os.PathSeparator) {
+	if isPathLike(b) {
 		abs, err := filepath.Abs(b)
 		if err != nil {
 			return "", err
 		}
-		if _, err := os.Stat(abs); err != nil {
+		resolved, ok := executableAt(abs)
+		if !ok {
 			return "", fmt.Errorf("llama-server binary not found at %s", abs)
 		}
-		return abs, nil
+		return resolved, nil
 	}
-	p, err := r.opts.LookPath(b)
-	if err != nil {
-		return "", fmt.Errorf("llama-server binary %q not found in PATH (set llamacpp.binary or MODELSERVER_LLAMA_CPP_BINARY)", b)
+	if p, err := r.opts.LookPath(b); err == nil {
+		return p, nil
 	}
-	return p, nil
+	if exe, err := os.Executable(); err == nil {
+		if p, ok := executableAt(filepath.Join(filepath.Dir(exe), b)); ok {
+			return p, nil
+		}
+	}
+	return "", fmt.Errorf("llama-server binary %q not found in PATH (set llamacpp.binary or MODELSERVER_LLAMA_CPP_BINARY)", b)
+}
+
+// isPathLike reports whether s names a location rather than a command to look
+// up in PATH. Windows accepts either separator, and a leading volume ("C:bin")
+// is a path too.
+func isPathLike(s string) bool {
+	return strings.ContainsAny(s, `/\`) || filepath.VolumeName(s) != ""
+}
+
+// executableAt returns the file at p, trying the platform's executable
+// extensions so a configured "llama-server" also finds "llama-server.exe".
+func executableAt(p string) (string, bool) {
+	for _, cand := range append([]string{p}, withExecExtensions(p)...) {
+		if st, err := os.Stat(cand); err == nil && !st.IsDir() {
+			return cand, true
+		}
+	}
+	return "", false
 }
 
 func (r *Runtime) Info(ctx context.Context) runtime.Info {

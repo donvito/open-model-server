@@ -44,7 +44,11 @@ the API, CLI or UI.
 
 ### Build from source
 
-Requires Go 1.25+ and (to rebuild the dashboard) Node 20+.
+Requires Go 1.25+ and (to rebuild the dashboard) Node 20+. Linux, macOS and Windows are
+supported. The ONNX runtime is built with cgo, so a C toolchain is needed: `gcc`/`clang` on
+Linux and macOS, and [MinGW-w64](https://www.mingw-w64.org/) (for example via
+[MSYS2](https://www.msys2.org/) or `winget install BrechtSanders.WinLibs.POSIX.UCRT`) on
+Windows.
 
 ```bash
 git clone https://github.com/donvito/open-models-server.git
@@ -72,11 +76,25 @@ modelserver serve --llama-binary /opt/llama.cpp/llama-server
 # or llamacpp.binary in modelserver.yaml
 ```
 
+```powershell
+# Windows: either separator works, and .exe may be omitted
+modelserver serve --llama-binary C:\llama.cpp\llama-server.exe
+```
+
+A bare name (`llama-server`) is looked up on `PATH` and then next to `modelserver` itself,
+so unpacking a llama.cpp release into the same folder is enough.
+
 Each loaded GGUF model becomes a `llama-server` child process on an internal port
 (default range `12000-12999`, loopback only). modelserver waits for `/health`, proxies
 OpenAI-compatible requests to it, captures its stdout/stderr into the log buffer, and stops
 it on unload or server shutdown. A crashed process is reported as `failed` (with the last
 error line from its output); there is no automatic restart loop.
+
+Stopping is graceful where the platform allows it: `SIGTERM` on Unix, a CTRL+BREAK console
+event on Windows, escalating to a kill ten seconds later. A child that dies before it can
+log anything is reported with its exit status, and on Windows common NTSTATUS codes are
+spelled out — `0xC0000135`, a missing DLL, is the usual reason a CUDA or Vulkan build of
+llama-server fails to start.
 
 Per-model config (JSON):
 
@@ -93,13 +111,23 @@ Per-model config (JSON):
 
 Download the ONNX Runtime shared library for your platform from the
 [onnxruntime releases](https://github.com/microsoft/onnxruntime/releases) and either place
-`libonnxruntime.so` / `libonnxruntime.dylib` / `onnxruntime.dll` next to the binary (or in
-`/usr/local/lib`, `/opt/onnxruntime/lib`, `/opt/homebrew/lib`) or point at it:
+`libonnxruntime.so` / `libonnxruntime.dylib` / `onnxruntime.dll` next to the binary or point
+at it:
 
 ```bash
 modelserver serve --onnx-library /opt/onnxruntime/lib/libonnxruntime.so
 # or MODELSERVER_ONNX_LIBRARY=... / onnx.library in modelserver.yaml
 ```
+
+Searched automatically, in order: next to `modelserver` (and its `lib/`), the working
+directory, every entry on `PATH` (and its `lib/`), then `/usr/local/lib`,
+`/opt/onnxruntime/lib`, `/opt/homebrew/lib` on Unix or `%ProgramFiles%\onnxruntime\lib` and
+`%LOCALAPPDATA%\onnxruntime\lib` on Windows. On Windows, keep the provider DLLs from the
+release archive (`onnxruntime_providers_*.dll`) in the same folder as `onnxruntime.dll`;
+that folder is added to the DLL search path when the library is loaded. The Windows system
+directories are skipped by the automatic search — the `onnxruntime.dll` that ships in
+`System32` belongs to Windows ML and is locked to an older API version — but they are still
+used if you point at one explicitly.
 
 A model path may be a `.onnx` file or a directory (Hugging Face export layout):
 `model.onnx` / `model_quantized.onnx`, `tokenizer.json`, and `config.json` (used for

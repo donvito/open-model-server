@@ -111,13 +111,16 @@ func (h *execHandle) Terminate(timeout time.Duration) error {
 		return nil
 	default:
 	}
-	if err := h.cmd.Process.Signal(syscall.SIGTERM); err != nil && !errors.Is(err, os.ErrProcessDone) {
+	graceful, err := signalStop(h.cmd)
+	if err != nil && !errors.Is(err, os.ErrProcessDone) {
 		return err
 	}
-	select {
-	case <-h.done:
-		return nil
-	case <-time.After(timeout):
+	if graceful {
+		select {
+		case <-h.done:
+			return nil
+		case <-time.After(timeout):
+		}
 	}
 	if err := h.cmd.Process.Kill(); err != nil && !errors.Is(err, os.ErrProcessDone) {
 		return err
@@ -135,6 +138,9 @@ func ExitDescription(err error) string {
 	if errors.As(err, &ee) {
 		if status, ok := ee.Sys().(syscall.WaitStatus); ok && status.Signaled() {
 			return "terminated by signal " + status.Signal().String()
+		}
+		if note := exitCodeNote(ee.ExitCode()); note != "" {
+			return fmt.Sprintf("exited with status %d (%s)", ee.ExitCode(), note)
 		}
 		return fmt.Sprintf("exited with status %d", ee.ExitCode())
 	}

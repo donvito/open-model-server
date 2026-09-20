@@ -24,8 +24,15 @@ jobs:
           name: web-dist
           path: web/dist
   go:
-    runs-on: ubuntu-latest
     needs: web
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    defaults:
+      run:
+        shell: bash
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5
@@ -35,8 +42,13 @@ jobs:
         with:
           name: web-dist
           path: web/dist
-      - run: test -z "$(gofmt -l .)"
+      - if: matrix.os == 'ubuntu-latest'
+        run: test -z "$(gofmt -l .)"
       - run: go vet ./...
       - run: go test ./...
-      - run: go build -o bin/modelserver ./cmd/modelserver
-      - run: ./bin/modelserver --version
+      - run: go build -o bin/ ./cmd/modelserver
+      - name: Smoke test the binary
+        run: |
+          bin=bin/modelserver
+          [ -f "$bin.exe" ] && bin="$bin.exe"
+          "$bin" --version
