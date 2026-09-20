@@ -46,7 +46,7 @@ func New(cfg config.Config, reg *registry.Registry, runtimes *rt.Registry, logSt
 }
 
 func (s *Service) Config() config.Config { return s.cfg }
-func (s *Service) Logs() *logs.Store    { return s.logs }
+func (s *Service) Logs() *logs.Store     { return s.logs }
 func (s *Service) Runtimes() *rt.Registry {
 	return s.runtimes
 }
