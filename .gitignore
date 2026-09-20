@@ -1,0 +1,12 @@
+/bin/
+/data/
+/models/
+*.db
+*.db-wal
+*.db-shm
+/web/node_modules/
+/web/dist/*
+!/web/dist/.gitkeep
+modelserver.yaml
+!modelserver.example.yaml
+.DS_Store
