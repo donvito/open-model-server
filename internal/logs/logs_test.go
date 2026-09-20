@@ -1,0 +1,53 @@
+package logs
+
+import (
+	"testing"
+	"time"
+)
+
+func TestBufferRingAndTail(t *testing.T) {
+	b := NewBuffer(3)
+	for _, s := range []string{"a", "b", "c", "d"} {
+		b.Append("stdout", s)
+	}
+	all := b.Tail(0)
+	if len(all) != 3 || all[0].Text != "b" || all[2].Text != "d" {
+		t.Fatalf("ring buffer contents = %+v", all)
+	}
+	last := b.Tail(2)
+	if len(last) != 2 || last[0].Text != "c" {
+		t.Fatalf("tail(2) = %+v", last)
+	}
+	b.Clear()
+	if len(b.Tail(0)) != 0 {
+		t.Fatal("clear should empty buffer")
+	}
+}
+
+func TestBufferSubscribe(t *testing.T) {
+	b := NewBuffer(10)
+	ch, cancel := b.Subscribe()
+	b.Systemf("hello %d", 1)
+	select {
+	case l := <-ch:
+		if l.Source != "system" || l.Text != "hello 1" {
+			t.Fatalf("got %+v", l)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("no line delivered")
+	}
+	cancel()
+	b.Append("stdout", "after cancel")
+}
+
+func TestStore(t *testing.T) {
+	s := NewStore(5)
+	s.Get("m1").Append("stdout", "x")
+	if got := s.Get("m1"); len(got.Tail(0)) != 1 {
+		t.Fatal("Get should return the same buffer")
+	}
+	s.Remove("m1")
+	if len(s.Get("m1").Tail(0)) != 0 {
+		t.Fatal("Remove should drop the buffer")
+	}
+}

@@ -1,0 +1,28 @@
+# Copy to modelserver.yaml (or pass --config). Every key is optional.
+# Precedence: CLI flags > MODELSERVER_* environment variables > this file > defaults.
+
+server:
+  host: 127.0.0.1
+  port: 9090
+  ui: true            # false == headless (APIs only)
+
+database:
+  path: ./data/modelserver.db
+
+models:
+  directory: ./models # relative model paths resolve against this directory
+
+llamacpp:
+  binary: llama-server           # path or name on PATH
+  port_range_start: 12000        # internal ports handed to llama-server processes
+  port_range_end: 12999
+  startup_timeout_seconds: 600
+
+onnx:
+  library: ""                    # path to libonnxruntime.so / .dylib / onnxruntime.dll (auto-detected if empty)
+
+auth:
+  api_keys: []                   # non-empty enables Bearer / X-API-Key auth on /api and /v1
+
+logs:
+  lines_per_model: 2000
