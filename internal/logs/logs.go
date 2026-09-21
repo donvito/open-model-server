@@ -75,11 +75,25 @@ func (b *Buffer) Tail(n int) []Line {
 
 // Subscribe returns a channel of new lines and a cancel function.
 func (b *Buffer) Subscribe() (<-chan Line, func()) {
+	_, ch, cancel := b.SubscribeWithReplay(0)
+	return ch, cancel
+}
+
+// SubscribeWithReplay atomically snapshots up to n existing lines and
+// subscribes to subsequent lines. Registering the subscriber while holding
+// the same lock used by Append prevents a line from falling between the
+// replay and live stream.
+func (b *Buffer) SubscribeWithReplay(n int) ([]Line, <-chan Line, func()) {
 	ch := make(chan Line, 256)
 	b.mu.Lock()
+	if n <= 0 || n > len(b.lines) {
+		n = len(b.lines)
+	}
+	replay := make([]Line, n)
+	copy(replay, b.lines[len(b.lines)-n:])
 	b.subs[ch] = struct{}{}
 	b.mu.Unlock()
-	return ch, func() {
+	return replay, ch, func() {
 		b.mu.Lock()
 		if _, ok := b.subs[ch]; ok {
 			delete(b.subs, ch)

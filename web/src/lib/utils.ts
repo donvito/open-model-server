@@ -6,7 +6,7 @@ export function cn(...inputs: ClassValue[]) {
 }
 
 export function formatBytes(n?: number): string {
-  if (!n) return '—'
+  if (n === undefined || !Number.isFinite(n)) return '—'
   const units = ['B', 'KiB', 'MiB', 'GiB', 'TiB']
   let i = 0
   let v = n

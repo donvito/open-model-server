@@ -59,6 +59,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /api/system/health", s.health)
 	mux.HandleFunc("GET /api/runtimes", s.runtimes)
 	mux.HandleFunc("GET /api/runtimes/{runtime}/logs", s.logsRuntime)
+	mux.HandleFunc("GET /api/runtimes/{runtime}/logs/stream", s.streamRuntimeLogs)
 
 	// OpenAI-compatible API
 	mux.HandleFunc("GET /v1/models", s.openAIModels)
@@ -300,14 +301,7 @@ func (s *Server) statusModel(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) logsRuntime(w http.ResponseWriter, r *http.Request) {
 	name := r.PathValue("runtime")
-	found := false
-	for _, runtime := range s.svc.Runtimes().All() {
-		if runtime.Name() == name {
-			found = true
-			break
-		}
-	}
-	if !found {
+	if !s.hasRuntime(name) {
 		writeError(w, http.StatusNotFound, "runtime not found", "not_found")
 		return
 	}
@@ -321,6 +315,15 @@ func (s *Server) logsRuntime(w http.ResponseWriter, r *http.Request) {
 		n = parsed
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"runtime": name, "lines": s.svc.Logs().Runtime(name).Tail(n)})
+}
+
+func (s *Server) hasRuntime(name string) bool {
+	for _, runtime := range s.svc.Runtimes().All() {
+		if runtime.Name() == name {
+			return true
+		}
+	}
+	return false
 }
 
 func (s *Server) logsModel(w http.ResponseWriter, r *http.Request) {
@@ -351,7 +354,7 @@ func (s *Server) streamLogs(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	buf := s.svc.Logs().Get(v.ID)
-	ch, cancel := buf.Subscribe()
+	replay, ch, cancel := buf.SubscribeWithReplay(200)
 	defer cancel()
 
 	w.Header().Set("Content-Type", "text/event-stream")
@@ -365,7 +368,7 @@ func (s *Server) streamLogs(w http.ResponseWriter, r *http.Request) {
 		fmt.Fprintf(w, "event: %s\ndata: %s\n\n", event, b)
 		flusher.Flush()
 	}
-	for _, l := range buf.Tail(200) {
+	for _, l := range replay {
 		send("log", l)
 	}
 	ping := time.NewTicker(15 * time.Second)
@@ -379,6 +382,52 @@ func (s *Server) streamLogs(w http.ResponseWriter, r *http.Request) {
 				return
 			}
 			send("log", l)
+		case <-ping.C:
+			fmt.Fprint(w, ": ping\n\n")
+			flusher.Flush()
+		}
+	}
+}
+
+func (s *Server) streamRuntimeLogs(w http.ResponseWriter, r *http.Request) {
+	name := r.PathValue("runtime")
+	if !s.hasRuntime(name) {
+		writeError(w, http.StatusNotFound, "runtime not found", "not_found")
+		return
+	}
+	flusher, ok := w.(http.Flusher)
+	if !ok {
+		writeError(w, http.StatusInternalServerError, "streaming unsupported", "internal_error")
+		return
+	}
+	buf := s.svc.Logs().Runtime(name)
+	replay, ch, cancel := buf.SubscribeWithReplay(500)
+	defer cancel()
+
+	w.Header().Set("Content-Type", "text/event-stream")
+	w.Header().Set("Cache-Control", "no-cache")
+	w.Header().Set("Connection", "keep-alive")
+	w.Header().Set("X-Accel-Buffering", "no")
+	w.WriteHeader(http.StatusOK)
+
+	send := func(event string, v any) {
+		b, _ := json.Marshal(v)
+		fmt.Fprintf(w, "event: %s\ndata: %s\n\n", event, b)
+		flusher.Flush()
+	}
+	send("snapshot", map[string]any{"runtime": name, "lines": replay})
+
+	ping := time.NewTicker(15 * time.Second)
+	defer ping.Stop()
+	for {
+		select {
+		case <-r.Context().Done():
+			return
+		case l, ok := <-ch:
+			if !ok {
+				return
+			}
+			send("line", l)
 		case <-ping.C:
 			fmt.Fprint(w, ": ping\n\n")
 			flusher.Flush()
