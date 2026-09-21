@@ -71,6 +71,8 @@ export const api = {
   health: () => request<{ status: string }>('/api/system/health'),
   system: () => request<SystemInfo>('/api/system'),
   runtimes: async () => (await request<{ runtimes: RuntimeInfo[] }>('/api/runtimes')).runtimes,
+  runtimeLogs: async (name: string, lines = 300, signal?: AbortSignal) =>
+    (await request<{ lines: LogLine[] }>(`/api/runtimes/${encodeURIComponent(name)}/logs?lines=${lines}`, { signal })).lines,
 
   listModels: async () => (await request<{ models: Model[] | null }>('/api/models')).models ?? [],
   getModel: (id: string) => request<Model>(`/api/models/${encodeURIComponent(id)}`),
@@ -111,6 +113,7 @@ export function streamLogs(id: string, onLine: (l: LogLine) => void, onError?: (
 
 export interface ChatChunk {
   delta: string
+  reasoning?: string
   done: boolean
   usage?: { prompt_tokens: number; completion_tokens: number }
 }
@@ -119,7 +122,11 @@ export interface ChatChunk {
 export async function streamChat(
   model: string,
   messages: ChatMessage[],
-  params: { temperature?: number; max_tokens?: number },
+  params: {
+    temperature?: number
+    max_tokens?: number
+    chat_template_kwargs?: Record<string, unknown>
+  },
   onChunk: (c: ChatChunk) => void,
   signal?: AbortSignal,
 ) {
@@ -150,12 +157,13 @@ export async function streamChat(
       }
       try {
         const j = JSON.parse(data) as {
-          choices?: { delta?: { content?: string | null }; finish_reason?: string | null }[]
+          choices?: { delta?: { content?: string | null; reasoning_content?: string | null }; finish_reason?: string | null }[]
           usage?: { prompt_tokens: number; completion_tokens: number }
         }
         const delta = j.choices?.[0]?.delta?.content ?? ''
+        const reasoning = j.choices?.[0]?.delta?.reasoning_content ?? ''
         const finished = Boolean(j.choices?.[0]?.finish_reason)
-        onChunk({ delta, done: finished, usage: j.usage })
+        onChunk({ delta, reasoning, done: finished, usage: j.usage })
       } catch {
         /* skip partial */
       }

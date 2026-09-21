@@ -173,7 +173,7 @@ func (s *Service) Create(ctx context.Context, in CreateInput) (*models.Model, er
 	if err := s.registry.Create(ctx, m); err != nil {
 		return nil, err
 	}
-	s.logs.Get(m.ID).Systemf("model %s registered (%s, %s)", m.Name, m.Runtime, m.Task)
+	s.logs.BindModel(m.ID, m.Name, m.Runtime).Systemf("model %s registered (%s, %s)", m.Name, m.Runtime, m.Task)
 	return m, nil
 }
 
@@ -300,17 +300,20 @@ func (s *Service) Load(ctx context.Context, ref string) (*ModelView, error) {
 }
 
 func (s *Service) loadLocked(ctx context.Context, m *models.Model) (*ModelView, error) {
+	log := s.logs.BindModel(m.ID, m.Name, m.Runtime)
 	r, err := s.runtimes.For(*m)
 	if err != nil {
 		return nil, err
 	}
 	_ = s.registry.SetStatus(ctx, m.ID, models.StatusStarting)
+	log.Systemf("load requested")
 	loadErr := r.Load(ctx, *m)
 	v := s.view(ctx, m)
 	if loadErr != nil {
 		if errors.Is(loadErr, rt.ErrAlreadyLoaded) {
 			return v, loadErr
 		}
+		log.Systemf("load failed: %v", loadErr)
 		v.Status = models.StatusFailed
 		v.Live.State = models.StatusFailed
 		if v.Live.Error == "" {

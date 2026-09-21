@@ -52,6 +52,7 @@ type fakeRunner struct {
 	// crashWith, when non-empty, makes the child print this line and exit 1
 	// instead of becoming healthy.
 	crashWith string
+	props     string
 	specs     []process.Spec
 }
 
@@ -80,6 +81,9 @@ func (r *fakeRunner) Start(ctx context.Context, spec process.Spec) (process.Hand
 	}
 	mux := http.NewServeMux()
 	mux.HandleFunc("/health", func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusOK) })
+	if r.props != "" {
+		mux.HandleFunc("/props", func(w http.ResponseWriter, _ *http.Request) { fmt.Fprint(w, r.props) })
+	}
 	mux.HandleFunc("/v1/models", func(w http.ResponseWriter, _ *http.Request) { fmt.Fprint(w, `{"object":"list","data":[]}`) })
 	h.srv = &http.Server{Handler: mux}
 	go h.srv.Serve(ln)
@@ -104,6 +108,33 @@ func newTestRuntime(t *testing.T, runner *fakeRunner) (*Runtime, models.Model) {
 	}, runner, ports, logs.NewStore(100))
 	m := models.Model{ID: "m1", Name: "tiny", Runtime: models.RuntimeLlamaCpp, Task: models.TaskChat, ModelPath: modelPath}
 	return rt, m
+}
+
+func TestRuntimeVisionCapability(t *testing.T) {
+	for _, tc := range []struct {
+		name, props string
+		vision      bool
+	}{
+		{"vision", `{"modalities":{"vision":true,"audio":false}}`, true},
+		{"text", `{"modalities":{"vision":false}}`, false},
+		{"audio only", `{"modalities":{"audio":true}}`, false},
+		{"missing modalities", `{}`, false},
+		{"older server", "", false},
+		{"invalid response", "not json", false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			rt, m := newTestRuntime(t, &fakeRunner{props: tc.props})
+			ctx := context.Background()
+			t.Cleanup(func() { rt.Shutdown(ctx) })
+			if err := rt.Load(ctx, m); err != nil {
+				t.Fatal(err)
+			}
+			st, err := rt.Status(ctx, m.ID)
+			if err != nil || st.State != models.StatusRunning || st.Details["vision"] != tc.vision {
+				t.Fatalf("status = %+v, err = %v; want running with vision=%v", st, err, tc.vision)
+			}
+		})
+	}
 }
 
 func TestRuntimeLifecycle(t *testing.T) {

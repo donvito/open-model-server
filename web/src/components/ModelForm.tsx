@@ -14,7 +14,7 @@ import { basename } from '@/lib/utils'
 const AUTO = '__auto__'
 
 const runtimeHints: Record<Runtime, string> = {
-  llamacpp: 'GGUF file served by a llama-server child process. Config keys: context_length, gpu_layers, threads, batch_size, extra_args.',
+  llamacpp: 'GGUF file served by a llama-server child process. For vision models, add --mmproj in extra_args. Config keys: context_length, gpu_layers, threads, batch_size, extra_args.',
   onnx: 'ONNX model file or a directory with model.onnx + tokenizer.json. Config keys: model_file, tokenizer_file, max_length, labels, pooling, normalize, threads.',
 }
 
@@ -144,7 +144,8 @@ export function ModelForm({ open, onOpenChange, model, onSaved }: ModelFormProps
         <div className="grid gap-4">
           <div className="grid gap-2">
             <Label htmlFor="path">Model path</Label>
-            <Input id="path" placeholder="/models/gemma-2b-it-q4_k_m.gguf or /models/my-onnx-dir" value={path} onChange={(e) => setPath(e.target.value)} autoFocus />
+            <Input id="path" placeholder="C:/models/gemma.gguf or C:/models/my-onnx-dir" value={path} onChange={(e) => setPath(e.target.value)} autoFocus />
+            <p className="text-muted-foreground text-xs">Use a path on the Modelserver machine. Hugging Face caches need the actual file under <code>snapshots/&lt;revision&gt;</code>.</p>
           </div>
           <div className="grid grid-cols-2 gap-4">
             <div className="grid gap-2">

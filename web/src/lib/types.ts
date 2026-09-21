@@ -70,6 +70,7 @@ export interface LogLine {
   time: string
   source: 'stdout' | 'stderr' | 'system'
   text: string
+  model?: string
 }
 
 export interface PredictResponse {
@@ -80,9 +81,13 @@ export interface PredictResponse {
   timing: { latency_ms: number; tokens_per_second?: number; tokens?: number }
 }
 
+export type ChatContentPart =
+  | { type: 'text'; text: string }
+  | { type: 'image_url'; image_url: { url: string } }
+
 export interface ChatMessage {
   role: 'system' | 'user' | 'assistant'
-  content: string
+  content: string | ChatContentPart[]
 }
 
 export const TASKS: Task[] = ['chat', 'completion', 'classification', 'embedding', 'reranking', 'custom']

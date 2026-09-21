@@ -67,6 +67,7 @@ type instance struct {
 	proxy     *httputil.ReverseProxy
 	base      *url.URL
 	recent    []string // recent output lines, used to explain failures
+	vision    bool
 }
 
 func New(opts Options, runner process.Runner, ports *process.PortAllocator, logStore *logs.Store) *Runtime {
@@ -305,12 +306,38 @@ func (r *Runtime) Load(ctx context.Context, m models.Model) error {
 		return errors.New(msg)
 	}
 
+	vision := r.supportsVision(ctx, in.base)
 	in.mu.Lock()
+	in.vision = vision
 	in.state = models.StatusRunning
 	in.err = ""
 	in.mu.Unlock()
 	log.Systemf("model %s is running", m.Name)
 	return nil
+}
+
+// Capability discovery is best-effort for older llama-server versions.
+func (r *Runtime) supportsVision(ctx context.Context, base *url.URL) bool {
+	ctx, cancel := context.WithTimeout(ctx, 2*time.Second)
+	defer cancel()
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, base.ResolveReference(&url.URL{Path: "/props"}).String(), nil)
+	if err != nil {
+		return false
+	}
+	resp, err := r.opts.HealthClient.Do(req)
+	if err != nil {
+		return false
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return false
+	}
+	var props struct {
+		Modalities struct {
+			Vision bool `json:"vision"`
+		} `json:"modalities"`
+	}
+	return json.NewDecoder(io.LimitReader(resp.Body, 1<<20)).Decode(&props) == nil && props.Modalities.Vision
 }
 
 func (r *Runtime) waitHealthy(ctx context.Context, in *instance, handle process.Handle) error {
@@ -437,6 +464,7 @@ func (r *Runtime) Status(ctx context.Context, id string) (runtime.Status, error)
 		t := in.startedAt
 		st.StartedAt = &t
 		st.Details["endpoint"] = in.base.String()
+		st.Details["vision"] = in.vision
 	}
 	if cfg, err := ParseConfig(in.model.Config); err == nil && cfg.ContextLength > 0 {
 		st.Details["context_length"] = cfg.ContextLength

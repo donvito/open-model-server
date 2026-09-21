@@ -359,6 +359,40 @@ func TestAuth(t *testing.T) {
 	}
 }
 
+func TestRuntimeLogsAPI(t *testing.T) {
+	e := newEnv(t, "secret")
+	auth := []string{"Authorization", "Bearer secret"}
+	path := "/api/runtimes/llamacpp/logs"
+	if rec, _ := e.do(t, "GET", path, nil); rec.Code != http.StatusUnauthorized {
+		t.Fatalf("runtime logs must require authentication: %d", rec.Code)
+	}
+	if rec, out := e.do(t, "GET", path, nil, auth...); rec.Code != 200 || len(out["lines"].([]any)) != 0 {
+		t.Fatalf("expected empty runtime logs: %d %s", rec.Code, rec.Body)
+	}
+	e.llama.failOn = "broken"
+	rec, out := e.do(t, "POST", "/api/models", map[string]any{"name": "broken", "model_path": e.ggufPath}, auth...)
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("create: %d %s", rec.Code, rec.Body)
+	}
+	e.do(t, "POST", "/api/models/"+out["id"].(string)+"/load", nil, auth...)
+	rec, out = e.do(t, "GET", path+"?lines=1", nil, auth...)
+	lines := out["lines"].([]any)
+	if rec.Code != 200 || len(lines) != 1 || lines[0].(map[string]any)["model"] != "broken" || !strings.Contains(lines[0].(map[string]any)["text"].(string), "load failed") {
+		t.Fatalf("missing attributed failure: %d %s", rec.Code, rec.Body)
+	}
+	if rec, out := e.do(t, "GET", "/api/runtimes/onnx/logs", nil, auth...); rec.Code != 200 || len(out["lines"].([]any)) != 0 {
+		t.Fatalf("logs leaked to another runtime: %d %s", rec.Code, rec.Body)
+	}
+	for _, query := range []string{"0", "-1", "2001", "invalid"} {
+		if rec, _ := e.do(t, "GET", path+"?lines="+query, nil, auth...); rec.Code != http.StatusBadRequest {
+			t.Fatalf("invalid line count %q: %d", query, rec.Code)
+		}
+	}
+	if rec, _ := e.do(t, "GET", "/api/runtimes/unknown/logs", nil, auth...); rec.Code != http.StatusNotFound {
+		t.Fatalf("unknown runtime: %d", rec.Code)
+	}
+}
+
 func TestSystemAndHeadlessRoot(t *testing.T) {
 	e := newEnv(t)
 	rec, out := e.do(t, "GET", "/api/system", nil)

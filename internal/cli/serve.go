@@ -78,8 +78,10 @@ func runServe(parent context.Context, cfg config.Config, g *globalFlags) error {
 	for _, rt := range a.Runtimes.All() {
 		info := rt.Info(ctx)
 		if info.Available {
+			a.Service.Logs().Runtime(rt.Name()).Systemf("runtime available (version=%s; details=%v)", info.Version, info.Details)
 			logger.Info("runtime available", "runtime", info.Name, "version", info.Version)
 		} else {
+			a.Service.Logs().Runtime(rt.Name()).Systemf("runtime unavailable: %s", info.Error)
 			logger.Warn("runtime unavailable", "runtime", info.Name, "reason", info.Error)
 		}
 	}

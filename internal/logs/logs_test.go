@@ -51,3 +51,34 @@ func TestStore(t *testing.T) {
 		t.Fatal("Remove should drop the buffer")
 	}
 }
+
+func TestRuntimeLogs(t *testing.T) {
+	s := NewStore(2)
+	a := s.BindModel("a", "gemma", "llamacpp")
+	b := s.BindModel("b", "other", "llamacpp")
+	onnx := s.BindModel("c", "classifier", "onnx")
+	a.Append("stderr", "loading")
+	modelLine := a.Tail(1)[0]
+	aggregate := s.Runtime("llamacpp").Tail(1)[0]
+	if aggregate.Model != "gemma" || aggregate.Source != "stderr" || aggregate.Time != modelLine.Time || modelLine.Model != "" {
+		t.Fatalf("incorrect mirrored line: %+v (original: %+v)", aggregate, modelLine)
+	}
+	b.Systemf("ready")
+	a.Append("stdout", "request")
+	onnx.Systemf("session created")
+	lines := s.Runtime("llamacpp").Tail(0)
+	if len(lines) != 2 || lines[0].Model != "other" || lines[1].Text != "request" {
+		t.Fatalf("aggregate should be bounded and ordered: %+v", lines)
+	}
+	if lines := s.Runtime("onnx").Tail(0); len(lines) != 1 || lines[0].Model != "classifier" {
+		t.Fatalf("runtimes must be isolated: %+v", lines)
+	}
+	s.Remove("a")
+	if len(s.Runtime("llamacpp").Tail(0)) != 2 {
+		t.Fatal("removing a model must preserve runtime history")
+	}
+	s.BindModel("b", "renamed", "onnx").Systemf("moved")
+	if lines := s.Runtime("onnx").Tail(1); lines[0].Model != "renamed" {
+		t.Fatalf("rebind did not update destination and label: %+v", lines)
+	}
+}

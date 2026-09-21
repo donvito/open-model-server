@@ -58,6 +58,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /api/system", s.system)
 	mux.HandleFunc("GET /api/system/health", s.health)
 	mux.HandleFunc("GET /api/runtimes", s.runtimes)
+	mux.HandleFunc("GET /api/runtimes/{runtime}/logs", s.logsRuntime)
 
 	// OpenAI-compatible API
 	mux.HandleFunc("GET /v1/models", s.openAIModels)
@@ -295,6 +296,31 @@ func (s *Server) statusModel(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"id": v.ID, "name": v.Name, "status": v.Live.State, "live": v.Live})
+}
+
+func (s *Server) logsRuntime(w http.ResponseWriter, r *http.Request) {
+	name := r.PathValue("runtime")
+	found := false
+	for _, runtime := range s.svc.Runtimes().All() {
+		if runtime.Name() == name {
+			found = true
+			break
+		}
+	}
+	if !found {
+		writeError(w, http.StatusNotFound, "runtime not found", "not_found")
+		return
+	}
+	n := 300
+	if q := r.URL.Query().Get("lines"); q != "" {
+		parsed, err := strconv.Atoi(q)
+		if err != nil || parsed < 1 || parsed > 2000 {
+			writeError(w, http.StatusBadRequest, "lines must be between 1 and 2000", "invalid_request_error")
+			return
+		}
+		n = parsed
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"runtime": name, "lines": s.svc.Logs().Runtime(name).Tail(n)})
 }
 
 func (s *Server) logsModel(w http.ResponseWriter, r *http.Request) {

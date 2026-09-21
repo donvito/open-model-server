@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import { CheckCircle2, XCircle } from 'lucide-react'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
+import { RuntimeLogs } from '@/components/RuntimeLogs'
 import { api } from '@/lib/api'
 import type { SystemInfo } from '@/lib/types'
 import { formatBytes, formatDuration } from '@/lib/utils'
@@ -87,6 +88,7 @@ export function SystemPage() {
                 ) : (
                   <p className="text-destructive mt-1 text-xs">{r.error}</p>
                 )}
+                <RuntimeLogs runtime={r.name} />
               </div>
             </div>
           ))}

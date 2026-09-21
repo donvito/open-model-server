@@ -11,14 +11,17 @@ type Line struct {
 	Time   time.Time `json:"time"`
 	Source string    `json:"source"` // stdout, stderr, system
 	Text   string    `json:"text"`
+	Model  string    `json:"model,omitempty"`
 }
 
 // Buffer is a ring buffer of log lines with fan-out to subscribers.
 type Buffer struct {
-	mu    sync.Mutex
-	cap   int
-	lines []Line
-	subs  map[chan Line]struct{}
+	mu     sync.Mutex
+	cap    int
+	lines  []Line
+	subs   map[chan Line]struct{}
+	mirror *Buffer
+	model  string
 }
 
 func NewBuffer(capacity int) *Buffer {
@@ -30,6 +33,10 @@ func NewBuffer(capacity int) *Buffer {
 
 func (b *Buffer) Append(source, text string) {
 	l := Line{Time: time.Now(), Source: source, Text: text}
+	b.appendLine(l)
+}
+
+func (b *Buffer) appendLine(l Line) {
 	b.mu.Lock()
 	if len(b.lines) >= b.cap {
 		copy(b.lines, b.lines[1:])
@@ -41,6 +48,10 @@ func (b *Buffer) Append(source, text string) {
 		case ch <- l:
 		default: // slow subscriber; drop rather than block the producer
 		}
+	}
+	if b.mirror != nil {
+		l.Model = b.model
+		b.mirror.appendLine(l)
 	}
 	b.mu.Unlock()
 }
@@ -111,4 +122,21 @@ func (s *Store) Remove(id string) {
 	s.mu.Lock()
 	delete(s.buffers, id)
 	s.mu.Unlock()
+}
+
+// Runtime returns the bounded aggregate log for an inference backend.
+func (s *Store) Runtime(name string) *Buffer {
+	return s.Get("runtime:" + name)
+}
+
+// BindModel mirrors subsequent model output into its runtime's log, retaining
+// the original timestamp and source. Runtime buffers never mirror other buffers.
+func (s *Store) BindModel(id, name, runtime string) *Buffer {
+	b := s.Get(id)
+	destination := s.Runtime(runtime)
+	b.mu.Lock()
+	b.model = name
+	b.mirror = destination
+	b.mu.Unlock()
+	return b
 }
