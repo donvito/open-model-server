@@ -40,6 +40,27 @@ func TestBufferSubscribe(t *testing.T) {
 	b.Append("stdout", "after cancel")
 }
 
+func TestBufferSubscribeWithReplayHasNoGap(t *testing.T) {
+	b := NewBuffer(10)
+	b.Append("stdout", "before")
+
+	replay, ch, cancel := b.SubscribeWithReplay(10)
+	defer cancel()
+	if len(replay) != 1 || replay[0].Text != "before" {
+		t.Fatalf("replay = %+v", replay)
+	}
+
+	b.Append("stderr", "after")
+	select {
+	case got := <-ch:
+		if got.Text != "after" {
+			t.Fatalf("live line = %+v", got)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("replayed subscription missed live line")
+	}
+}
+
 func TestStore(t *testing.T) {
 	s := NewStore(5)
 	s.Get("m1").Append("stdout", "x")

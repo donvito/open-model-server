@@ -59,11 +59,25 @@ export interface SystemInfo {
   hostname: string
   go_version: string
   memory: { total_bytes?: number; available_bytes?: number }
+  cpu?: { usage_percent?: number | null; error?: string }
+  gpu?: { available: boolean; error?: string; devices: GPUInfo[] }
   uptime_seconds: number
   runtimes: RuntimeInfo[]
   models: { total: number; running: number; failed: number }
   server: Record<string, unknown>
   paths: Record<string, string>
+}
+
+export interface GPUInfo {
+  index: number
+  uuid: string
+  name: string
+  driver_version: string
+  utilization_percent?: number | null
+  memory_used_bytes?: number | null
+  memory_total_bytes?: number | null
+  temperature_c?: number | null
+  power_watts?: number | null
 }
 
 export interface LogLine {

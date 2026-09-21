@@ -50,10 +50,10 @@ export function ModelDetailPage() {
   return (
     <div className="flex flex-col gap-6">
       <BackLink />
-      <div className="flex items-start justify-between gap-4">
+      <div className="flex flex-wrap items-start justify-between gap-4 border-b pb-5">
         <div className="min-w-0">
           <div className="flex items-center gap-3">
-            <h1 className="truncate text-2xl font-semibold tracking-tight">{model.name}</h1>
+            <h1 className="truncate text-xl font-semibold tracking-tight">{model.name}</h1>
             <StatusBadge state={live.state} />
           </div>
           <div className="text-muted-foreground mt-1 flex flex-wrap items-center gap-2 text-sm">
@@ -205,12 +205,12 @@ function LogViewer({ id }: { id: string }) {
           <Trash /> Clear
         </Button>
       </div>
-      <div ref={box} className="bg-black/40 mx-4 h-[60vh] overflow-auto rounded-md p-3 font-mono text-xs leading-5">
+      <div ref={box} className="bg-background mx-4 h-[60vh] overflow-auto rounded-md border p-3 font-mono text-xs leading-5">
         {shown.length === 0 && <div className="text-muted-foreground">No log output yet. Load the model to see runtime logs.</div>}
         {shown.map((l, i) => (
           <div key={i} className="flex gap-2 whitespace-pre-wrap break-all">
             <span className="text-muted-foreground shrink-0 select-none">{new Date(l.time).toLocaleTimeString()}</span>
-            <span className={cn('shrink-0 select-none w-14', l.source === 'stderr' ? 'text-amber-400/80' : l.source === 'system' ? 'text-violet-300' : 'text-emerald-300/80')}>{l.source}</span>
+            <span className={cn('shrink-0 select-none w-14', l.source === 'stderr' ? 'text-amber-700 dark:text-amber-400' : l.source === 'system' ? 'text-muted-foreground' : 'text-primary')}>{l.source}</span>
             <span>{l.text}</span>
           </div>
         ))}
@@ -260,7 +260,7 @@ function ApiExamples({ model }: { model: Model }) {
             <CardTitle className="text-sm">{e.title}</CardTitle>
           </CardHeader>
           <CardContent>
-            <pre className="bg-black/40 overflow-x-auto rounded-md p-3 font-mono text-xs">{e.body}</pre>
+            <pre className="bg-background overflow-x-auto rounded-md border p-3 font-mono text-xs">{e.body}</pre>
           </CardContent>
         </Card>
       ))}

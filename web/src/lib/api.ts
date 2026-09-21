@@ -111,6 +111,95 @@ export function streamLogs(id: string, onLine: (l: LogLine) => void, onError?: (
   return () => es.close()
 }
 
+export type RuntimeLogsStreamStatus = 'connecting' | 'open' | 'reconnecting' | 'closed'
+
+export interface RuntimeLogsStreamHandlers {
+  onSnapshot: (lines: LogLine[]) => void
+  onLine: (line: LogLine) => void
+  onError?: (e: Event, status: RuntimeLogsStreamStatus) => void
+  onStatus?: (status: RuntimeLogsStreamStatus) => void
+}
+
+/** Subscribe to the runtime SSE stream. Each connection starts with a snapshot. */
+export function streamRuntimeLogs(name: string, handlers: RuntimeLogsStreamHandlers) {
+  // EventSource cannot set headers; pass the key as a query param (server accepts both).
+  const k = getApiKey()
+  const url = `/api/runtimes/${encodeURIComponent(name)}/logs/stream${k ? `?api_key=${encodeURIComponent(k)}` : ''}`
+  const initialRetryDelay = 1000
+  const maxRetryDelay = 30000
+  let stopped = false
+  let source: EventSource | undefined
+  let retryTimer: ReturnType<typeof setTimeout> | undefined
+  let retryAttempt = 0
+  handlers.onStatus?.('connecting')
+
+  const clearRetry = () => {
+    if (retryTimer !== undefined) {
+      clearTimeout(retryTimer)
+      retryTimer = undefined
+    }
+  }
+
+  const connect = () => {
+    if (stopped) return
+    const es = new EventSource(url)
+    source = es
+    es.onopen = () => {
+      if (stopped || source !== es) return
+      retryAttempt = 0
+      handlers.onStatus?.('open')
+    }
+    es.addEventListener('snapshot', (ev) => {
+      if (stopped || source !== es) return
+      try {
+        const payload = JSON.parse((ev as MessageEvent<string>).data) as { lines?: LogLine[] } | LogLine[]
+        const lines = Array.isArray(payload) ? payload : payload?.lines
+        if (Array.isArray(lines)) handlers.onSnapshot(lines)
+      } catch {
+        /* ignore malformed */
+      }
+    })
+    es.addEventListener('line', (ev) => {
+      if (stopped || source !== es) return
+      try {
+        handlers.onLine(JSON.parse((ev as MessageEvent<string>).data) as LogLine)
+      } catch {
+        /* ignore malformed */
+      }
+    })
+    es.onerror = (e) => {
+      if (stopped || source !== es) return
+      if (es.readyState === EventSource.CONNECTING) {
+        handlers.onStatus?.('reconnecting')
+        handlers.onError?.(e, 'reconnecting')
+        return
+      }
+
+      source = undefined
+      es.close()
+      if (retryTimer !== undefined) return
+      const delay = Math.min(maxRetryDelay, initialRetryDelay * 2 ** retryAttempt)
+      retryAttempt = Math.min(retryAttempt + 1, 31)
+      handlers.onStatus?.('reconnecting')
+      handlers.onError?.(e, 'reconnecting')
+      retryTimer = setTimeout(() => {
+        retryTimer = undefined
+        connect()
+      }, delay)
+    }
+  }
+
+  connect()
+  return () => {
+    if (stopped) return
+    stopped = true
+    clearRetry()
+    source?.close()
+    source = undefined
+    handlers.onStatus?.('closed')
+  }
+}
+
 export interface ChatChunk {
   delta: string
   reasoning?: string

@@ -10,6 +10,8 @@ The API is served from the same address as the dashboard, normally
 | `GET` | `/api/system/health` | Liveness check. |
 | `GET` | `/api/system` | Host, database, and runtime information. |
 | `GET` | `/api/runtimes` | Runtime availability. |
+| `GET` | `/api/runtimes/{runtime}/logs?n=200` | Recent runtime logs (`llamacpp` or `onnx`). |
+| `GET` | `/api/runtimes/{runtime}/logs/stream` | Live runtime logs over server-sent events. |
 | `GET` | `/api/models` | List registered models and live status. |
 | `POST` | `/api/models` | Register a model. |
 | `GET` | `/api/models/{id}` | Get model metadata and status. |
@@ -24,6 +26,29 @@ The API is served from the same address as the dashboard, normally
 
 Models can be addressed by registry name or ID. Live states are `stopped`, `starting`,
 `running`, `failed`, and `stopping`.
+
+### Live system telemetry
+
+`GET /api/system` includes physical `memory.total_bytes` and
+`memory.available_bytes`, host-wide `cpu.usage_percent`, and NVIDIA telemetry in
+`gpu.devices`. GPU devices report identity and driver version, utilization percent,
+used/total VRAM bytes, temperature in Celsius, and power in watts when supported.
+These are host-wide measurements, not memory attributed only to registered models.
+
+CPU utilization needs two samples; missing values mean unavailable, not zero.
+CPU and physical memory collection support Windows and Linux. NVIDIA data requires
+`nvidia-smi` on the server's PATH; queries are cached and time-bounded. A missing or
+unsupported GPU is reported through `gpu.available` and `gpu.error` without failing
+the rest of the system response. The dashboard refreshes telemetry every three seconds.
+
+### Runtime log streams
+
+The runtime stream sends a `snapshot` event containing a JSON object with `runtime`
+and a `lines` array, followed by `line` events containing individual JSON log records. Replace
+the displayed history on each snapshot, including after a reconnect. Heartbeat
+comments keep idle connections alive. Logs are bounded, in-memory diagnostic
+history, not a durable audit log. The dashboard shows streams by default and saves
+the visibility preference in the browser; hiding or pausing logs closes the stream.
 
 ## Generic prediction
 

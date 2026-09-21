@@ -36,6 +36,8 @@ type Service struct {
 	runtimes *rt.Registry
 	logs     *logs.Store
 	started  time.Time
+	cpu      cpuSampler
+	gpu      gpuCache
 
 	mu    sync.Mutex
 	locks map[string]*sync.Mutex // per-model lifecycle lock
@@ -457,6 +459,8 @@ type SystemInfo struct {
 	Hostname      string            `json:"hostname"`
 	GoVersion     string            `json:"go_version"`
 	Memory        MemoryInfo        `json:"memory"`
+	CPU           CPUInfo           `json:"cpu"`
+	GPU           GPUInfo           `json:"gpu"`
 	UptimeSeconds float64           `json:"uptime_seconds"`
 	Runtimes      []rt.Info         `json:"runtimes"`
 	Models        ModelCounts       `json:"models"`
@@ -465,8 +469,8 @@ type SystemInfo struct {
 }
 
 type MemoryInfo struct {
-	TotalBytes     uint64 `json:"total_bytes,omitempty"`
-	AvailableBytes uint64 `json:"available_bytes,omitempty"`
+	TotalBytes     uint64 `json:"total_bytes"`
+	AvailableBytes uint64 `json:"available_bytes"`
 }
 
 type ModelCounts struct {
@@ -485,6 +489,8 @@ func (s *Service) System(ctx context.Context) SystemInfo {
 		Hostname:      host,
 		GoVersion:     runtime.Version(),
 		Memory:        readMemory(),
+		CPU:           s.cpu.read(),
+		GPU:           s.gpu.read(ctx),
 		UptimeSeconds: time.Since(s.started).Seconds(),
 		Server: map[string]any{
 			"host":         s.cfg.Server.Host,

@@ -1,6 +1,7 @@
 package api
 
 import (
+	"bufio"
 	"bytes"
 	"context"
 	"encoding/json"
@@ -165,6 +166,32 @@ func errCode(out map[string]any) string {
 	e, _ := out["error"].(map[string]any)
 	c, _ := e["code"].(string)
 	return c
+}
+
+func readSSEEvent(t *testing.T, r *bufio.Reader) (string, string) {
+	t.Helper()
+	var event, data string
+	for {
+		line, err := r.ReadString('\n')
+		if err != nil {
+			t.Fatal(err)
+		}
+		line = strings.TrimRight(line, "\r\n")
+		if line == "" {
+			if event != "" {
+				return event, data
+			}
+			continue
+		}
+		if strings.HasPrefix(line, "event:") {
+			event = strings.TrimSpace(strings.TrimPrefix(line, "event:"))
+		} else if strings.HasPrefix(line, "data:") {
+			if data != "" {
+				data += "\n"
+			}
+			data += strings.TrimSpace(strings.TrimPrefix(line, "data:"))
+		}
+	}
 }
 
 func TestModelLifecycleViaAPI(t *testing.T) {
@@ -391,6 +418,73 @@ func TestRuntimeLogsAPI(t *testing.T) {
 	if rec, _ := e.do(t, "GET", "/api/runtimes/unknown/logs", nil, auth...); rec.Code != http.StatusNotFound {
 		t.Fatalf("unknown runtime: %d", rec.Code)
 	}
+	if rec, _ := e.do(t, "GET", "/api/runtimes/unknown/logs/stream", nil, auth...); rec.Code != http.StatusNotFound {
+		t.Fatalf("unknown runtime stream: %d", rec.Code)
+	}
+}
+
+func TestRuntimeLogsStream(t *testing.T) {
+	e := newEnv(t, "secret")
+	auth := []string{"Authorization", "Bearer secret"}
+	rec, out := e.do(t, "POST", "/api/models", map[string]any{"name": "first", "model_path": e.ggufPath}, auth...)
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("create: %d %s", rec.Code, rec.Body)
+	}
+	if rec, _ = e.do(t, "POST", "/api/models/"+out["id"].(string)+"/load", nil, auth...); rec.Code != http.StatusOK {
+		t.Fatalf("load: %d %s", rec.Code, rec.Body)
+	}
+
+	ts := httptest.NewServer(e.h)
+	defer ts.Close()
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, ts.URL+"/api/runtimes/llamacpp/logs/stream?api_key=secret", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK || !strings.HasPrefix(resp.Header.Get("Content-Type"), "text/event-stream") {
+		t.Fatalf("stream response: %d %s", resp.StatusCode, resp.Header.Get("Content-Type"))
+	}
+	reader := bufio.NewReader(resp.Body)
+	event, data := readSSEEvent(t, reader)
+	if event != "snapshot" {
+		t.Fatalf("first event = %q, want snapshot", event)
+	}
+	var snapshot struct {
+		Runtime string      `json:"runtime"`
+		Lines   []logs.Line `json:"lines"`
+	}
+	if err := json.Unmarshal([]byte(data), &snapshot); err != nil {
+		t.Fatalf("snapshot JSON: %v", err)
+	}
+	if snapshot.Runtime != "llamacpp" || len(snapshot.Lines) == 0 {
+		t.Fatalf("snapshot = %+v", snapshot)
+	}
+
+	rec, out = e.do(t, "POST", "/api/models", map[string]any{"name": "second", "model_path": e.ggufPath}, auth...)
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("second create: %d %s", rec.Code, rec.Body)
+	}
+	if rec, _ = e.do(t, "POST", "/api/models/"+out["id"].(string)+"/load", nil, auth...); rec.Code != http.StatusOK {
+		t.Fatalf("second load: %d %s", rec.Code, rec.Body)
+	}
+	event, data = readSSEEvent(t, reader)
+	if event != "line" {
+		t.Fatalf("live event = %q, want line", event)
+	}
+	var line logs.Line
+	if err := json.Unmarshal([]byte(data), &line); err != nil {
+		t.Fatalf("line JSON: %v", err)
+	}
+	if line.Text == "" || line.Model != "second" {
+		t.Fatalf("live line = %+v", line)
+	}
+	cancel()
 }
 
 func TestSystemAndHeadlessRoot(t *testing.T) {
